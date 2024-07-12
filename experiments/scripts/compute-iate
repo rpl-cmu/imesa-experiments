@@ -1,0 +1,56 @@
+#!/usr/bin/env python
+import argparse
+import glob
+import os
+
+import jrl
+import numpy as np
+from helpers.parsing import read_results_metrics_all
+from helpers.metrics import aggregate_metrics
+
+
+def handle_args():
+    parser = argparse.ArgumentParser(
+        description="Compares the convergence of multiple results on a single dataset"
+    )
+    parser.add_argument(
+        "--method_result_dirs",
+        "-r",
+        type=str,
+        nargs="+",
+        help="Directories of method results.",
+        default=[],
+    )
+    parser.add_argument(
+        "--title",
+        "-t",
+        type=str,
+        help="Title For the Plot",
+        default="",
+    )
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    args = handle_args()
+    parser = jrl.Parser()
+
+    for result_dir in args.method_result_dirs:
+        result_dict = {
+            "ate_trans": [],
+            "ate_rot": [],
+            "mean_residual": [],
+            "iate_trans": [],
+            "iate_rot": [],
+            "imean_residual": [],
+            "average_total_runtime": [],
+            "statuses": [],
+        }
+        aggregate_metrics(result_dir, result_dict)
+        print(result_dir)
+        print(
+            "iate(t): {} \niate(r):{}".format(
+                result_dict["iate_trans"], result_dict["iate_rot"]
+            )
+        )
+        print("{:.2f} & {:.3f}".format(result_dict["iate_trans"][0], result_dict["iate_rot"][0]))

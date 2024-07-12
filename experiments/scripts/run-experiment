@@ -1,0 +1,178 @@
+#!/usr/bin/env python
+import os
+import glob
+import argparse
+import subprocess
+import multiprocessing as mp
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+BUILD_DIR = os.path.join(SCRIPT_DIR, "../../", "build")
+RUNNER = os.path.join(BUILD_DIR, "experiments", "run-trial")
+
+"""
+We assume that this script is run with a directory with the following structure
+- experiment/
+    - datasets/
+        - independent_var_0/
+            - iv1_dataset_0000.jrl
+            - iv2_dataset_0001.jrl
+            - ...
+        - ...
+    - results/
+        - independent_var_0/
+        - ...
+
+Given a list of methods (and their config), a list of independent variables,and a communication model config this script 
+will run (in parallel) all methods on all datasets for all independent variables and organize the results in results/
+"""
+
+
+def handle_args():
+    parser = argparse.ArgumentParser(
+        description="Runs many methods on many datasets broken down by some independent variable and organizes results."
+    )
+    parser.add_argument(
+        "--experiment_dir",
+        "-d",
+        type=str,
+        help="Path to experiment directory",
+        required=True,
+    )
+    parser.add_argument(
+        "--independent_variables",
+        "-iv",
+        type=str,
+        help="The independent variables",
+        required=True,
+        nargs="+",
+    )
+    parser.add_argument(
+        "--methods",
+        "-m",
+        type=str,
+        nargs="+",
+        help="The method to run on these datasets.",
+        required=True,
+    )
+    parser.add_argument(
+        "--method_configs",
+        "-p",
+        type=str,
+        nargs="+",
+        help="The config files for each method",
+        required=True,
+    )
+    parser.add_argument(
+        "--comm_config",
+        "-c",
+        type=str,
+        help="The communicaiton model config file",
+        required=True,
+    )
+    parser.add_argument(
+        "--nworkers", "-n", help="Number of threads to spin up", required=True, type=int
+    )
+    parser.add_argument(
+        "--rate", "-r", help="The rate at which to save out data", default=1, type=int
+    )
+    parser.add_argument("--seed", "-s", help="The random seed", default=42, type=int)
+    parser.add_argument("--type", "-t", help="The pose type", default="POSE2", type=str)
+
+    return parser.parse_args()
+
+
+def aligned_worker(
+    dataset_file, method, output_file, rate, seed, method_config, comm_config, pose_type
+):
+    command = "{} -d {} -m {} -o {} -r {} -s {} {} {} -t {}".format(
+        RUNNER,
+        dataset_file,
+        method,
+        output_file,
+        rate,
+        seed,
+        "-p {}".format(method_config) if method_config != "" else "",
+        "-c {}".format(comm_config) if comm_config != "" else "",
+        pose_type,
+    )
+    subprocess.call(command.split(" "))
+
+
+def noalign_worker(
+    dataset_file, method, output_file, rate, seed, method_config, comm_config, pose_type
+):
+    command = "{} -d {} -m {} -o {} -r {} -s {} {} {} -t {} --no_align".format(
+        RUNNER,
+        dataset_file,
+        method,
+        output_file,
+        rate,
+        seed,
+        "-p {}".format(method_config) if method_config != "" else "",
+        "-c {}".format(comm_config) if comm_config != "" else "",
+        pose_type,
+    )
+    subprocess.call(command.split(" "))
+
+
+def main():
+    args = handle_args()
+    # Datasets and Results Directory
+    datasets_dir = os.path.join(args.experiment_dir, "datasets")
+    results_dir = os.path.join(args.experiment_dir, "results")
+    os.makedirs(results_dir, exist_ok=True)
+
+    pool = mp.Pool(args.nworkers)
+
+    # Iterate over the independent variable
+    for indep_var in args.independent_variables:
+        # Setup variable directories
+        indep_var_dataset_dir = os.path.join(datasets_dir, indep_var)
+        indep_var_results_dir = os.path.join(results_dir, indep_var)
+        os.makedirs(indep_var_results_dir, exist_ok=True)
+
+        # Get all variable datasets
+        indep_var_dataset_files = glob.glob(
+            os.path.join(indep_var_dataset_dir, "*.jrl")
+        )
+
+        for method, method_config in zip(args.methods, args.method_configs):
+            os.makedirs(
+                os.path.join(indep_var_results_dir, method, "aligned"), exist_ok=True
+            )
+            os.makedirs(
+                os.path.join(indep_var_results_dir, method, "no_align"), exist_ok=True
+            )
+            for idv_dataset_file in indep_var_dataset_files:
+                pool.apply_async(
+                    aligned_worker,
+                    args=(
+                        idv_dataset_file,
+                        method,
+                        os.path.join(indep_var_results_dir, method, "aligned"),
+                        args.rate,
+                        args.seed,
+                        method_config,
+                        args.comm_config,
+                        args.type,
+                    ),
+                )
+                pool.apply_async(
+                    noalign_worker,
+                    args=(
+                        idv_dataset_file,
+                        method,
+                        os.path.join(indep_var_results_dir, method, "no_align"),
+                        args.rate,
+                        args.seed,
+                        method_config,
+                        args.comm_config,
+                        args.type,
+                    ),
+                )
+    pool.close()
+    pool.join()
+
+
+if __name__ == "__main__":
+    main()

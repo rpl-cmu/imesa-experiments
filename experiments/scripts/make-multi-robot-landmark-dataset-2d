@@ -1,0 +1,537 @@
+#!/usr/bin/env python
+import argparse
+import os
+import sys
+from datetime import date
+
+import random
+import gtsam
+import jrl
+import numpy as np
+from gtsam.symbol_shorthand import X
+from scipy.stats import chi2
+from copy import copy
+from string import ascii_letters
+
+
+# GLOBALS
+ODOM_OPTIONS_GRIDWORLD = [
+    gtsam.Pose2(1, 0, 0),  # Move forward
+    gtsam.Pose2(0, 0, np.pi / 2.0),  # Turn left
+    gtsam.Pose2(0, 0, -np.pi / 2.0),  # Turn right
+]
+
+# GLOBALS
+ODOM_OPTIONS_CONTINUOUS = [
+    gtsam.Pose2(0.5, 0, 0),  # Move forward
+    gtsam.Pose2(0.25, 0, 0.2),  # Turn left
+    gtsam.Pose2(0.25, 0, -0.2),  # Turn right
+]
+
+
+def handle_args():
+    parser = argparse.ArgumentParser(
+        description="Generates a random multi-robot grid-world pose graph dataset in jrl format."
+    )
+    parser.add_argument(
+        "-o", "--output_dir", type=str, required=True, help="The output directory."
+    )
+    parser.add_argument(
+        "-n", "--name", type=str, required=True, help="The base name for the dataset."
+    )
+    parser.add_argument(
+        "-r",
+        "--repeats",
+        type=int,
+        default=1,
+        help="The number of datasets to generate.",
+    )
+    parser.add_argument(
+        "-nr",
+        "--number_robots",
+        type=int,
+        default=2,
+        help="The number of robots",
+    )
+    parser.add_argument(
+        "-np",
+        "--number_poses",
+        type=int,
+        default=500,
+        help="Number of poses for each robot",
+    )
+    parser.add_argument(
+        "-nl",
+        "--number_landmarks",
+        type=int,
+        default=10,
+        help="Number landmarks to generate",
+    )
+
+    parser.add_argument(
+        "--odom_probs",
+        type=float,
+        nargs="+",
+        default=[0.8, 0.15, 0.05],
+        help="Odom action probabilities [forward, left, right]",
+    )
+    parser.add_argument(
+        "--odom_type",
+        type=str,
+        default="gridworld",
+        help="Odometry Type [gridworld, contworld] (grid or continuous space",
+    )
+
+    parser.add_argument(
+        "--prior_noise_sigmas",
+        type=float,
+        nargs="+",
+        default=[0.01, 0.01, 0.1],
+        help="Sigmas for diagonal noise model of prior measurements",
+    )
+
+    parser.add_argument(
+        "--robot_zero_prior_noise_sigmas",
+        type=float,
+        nargs="+",
+        default=[0.01, 0.01, 0.1],
+        help="Sigmas for diagonal noise model of robot zero's prior measurements",
+    )
+
+    parser.add_argument(
+        "--odom_noise_sigmas",
+        type=float,
+        nargs="+",
+        default=[0.05, 0.05, 1],
+        help="Sigmas for diagonal noise model of odometry measurements",
+    )
+
+    parser.add_argument(
+        "--landmark_measurement_prob",
+        type=float,
+        default=1.0,
+        help="The probability that a landmark measurement is successful",
+    )
+
+    parser.add_argument(
+        "--landmark_measurement_range",
+        type=float,
+        default=20.0,
+        help="The max distance that a robot can observe a landmark",
+    )
+
+    parser.add_argument(
+        "--landmark_measurement_type",
+        type=str,
+        default="bearing_range",
+        help="The measurement type for inter-robot measurements [bearing_range, range]",
+    )
+
+    parser.add_argument(
+        "--landmark_measurement_noise_sigmas",
+        type=float,
+        nargs="+",
+        default=[1, 0.1],
+        help="Sigmas for diagonal noise model of landmark measurements",
+    )
+
+    parser.add_argument(
+        "--initialization_type",
+        type=str,
+        default="odom",
+        help="What initialization type to use ('odom', 'gt', 'noisy_gt').",
+    )
+
+    parser.add_argument(
+        "--initialization_noise_sigmas",
+        type=float,
+        nargs="+",
+        default=[1.0, 1.0, 20],
+        help="Sigmas to use for 'noisy-gt' initialization.",
+    )
+
+    parser.add_argument(
+        "--xlims",
+        type=float,
+        nargs="+",
+        default=[-20, 20],
+        help="X Dimension Limits",
+    )
+
+    parser.add_argument(
+        "--ylims",
+        type=float,
+        nargs="+",
+        default=[-20, 20],
+        help="X Dimension Limits",
+    )
+
+    return parser.parse_args()
+
+
+def add_priors(
+    builder,
+    robots,
+    stamp,
+    pose_number,
+    prev_gt_poses,
+    prev_est_poses,
+    args,
+):
+    for i, rid in enumerate(robots):
+        key = gtsam.symbol(rid, pose_number)
+        fg = gtsam.NonlinearFactorGraph()
+        if args.odom_type == "contworld":
+            start_y = [-10, -5, 0, 5, 10]
+            init_pose = gtsam.Pose2(0, start_y[i], 0)  # np.random.uniform(0, 0.1))
+        else:
+            init_pose = gtsam.Pose2(
+                np.random.uniform(args.xlims[0] / 2, args.xlims[1] / 2),
+                np.random.uniform(args.ylims[0] / 2, args.ylims[1] / 2),
+                np.random.choice([0, np.pi / 2, np.pi, -np.pi / 2]),
+            )
+
+        noise_sigmas = args.prior_noise_sigmas
+        if i == 0:
+            noise_sigmas = args.robot_zero_prior_noise_sigmas
+        # Convert theta element to radians
+        noise_sigmas[2] = np.deg2rad(noise_sigmas[2])
+
+        fg.addPriorPose2(
+            key,
+            init_pose,
+            gtsam.noiseModel.Isotropic.Sigmas(noise_sigmas),
+        )
+        vals = gtsam.Values()
+        vals.insert(key, init_pose)
+
+        builder.addEntry(
+            rid,
+            stamp,
+            fg,
+            [jrl.PriorFactorPose2Tag],
+            {},
+            jrl.TypedValues(vals, {key: jrl.Pose2Tag}),
+            jrl.TypedValues(vals, {key: jrl.Pose2Tag}),
+        )
+        # Update the prev_vals
+        prev_gt_poses.insert(key, init_pose)
+        prev_est_poses.insert(key, init_pose)
+    return builder, prev_gt_poses, prev_est_poses
+
+
+def add_odom_step(
+    rid,
+    graphs,
+    factor_types,
+    new_est_vals,
+    new_est_types,
+    new_gt_vals,
+    new_gt_types,
+    pose_number,
+    odom_noise_model,
+    odom_noise_gen,
+    odom_gen,
+    prev_gt_poses,
+    prev_est_poses,
+    init_noise_gen,
+    args,
+):
+    key = gtsam.symbol(rid, pose_number)
+    prev_key = gtsam.symbol(rid, pose_number - 1)
+
+    odom = odom_gen(prev_gt_poses.atPose2(prev_key))
+    noise = odom_noise_gen()
+    measure = odom.compose(noise)
+
+    gt_pose = prev_gt_poses.atPose2(prev_key).compose(odom)
+    est_pose = prev_est_poses.atPose2(prev_key).compose(measure)
+
+    graphs[rid].add(gtsam.BetweenFactorPose2(prev_key, key, measure, odom_noise_model))
+    factor_types[rid].append(jrl.BetweenFactorPose2Tag)
+
+    new_est_vals[rid].insert(key, est_pose)
+    new_est_types[rid][key] = jrl.Pose2Tag
+
+    new_gt_vals[rid].insert(key, gt_pose)
+    new_gt_types[rid][key] = jrl.Pose2Tag
+
+    # Update the prev_vals
+    prev_gt_poses.insert(key, gt_pose)
+    if args.initialization_type == "gt":
+        prev_est_poses.insert(key, gt_pose)
+    elif args.initialization_type == "noisy_gt":
+        prev_est_poses.insert(key, gt_pose.compose(init_noise_gen()))
+    elif args.initialization_type == "odom":
+        prev_est_poses.insert(key, est_pose)
+    else:
+        raise Exception("Invalid Initialization_type")
+
+
+def make_loop_entry(vals, pose_key, landmark_key, noise_model, gen_noise, measure_type):
+    noise = gen_noise()
+    if measure_type == "range":
+        rel_pos = vals.atPose2(pose_key).translation() - vals.atPoint2(landmark_key)
+        r = np.linalg.norm(rel_pos) + noise
+        return gtsam.RangeFactor2d(pose_key, landmark_key, r, noise_model)
+    elif measure_type == "bearing_range":
+        rel_pos = vals.atPose2(pose_key).transformTo(vals.atPoint2(landmark_key))
+        b = gtsam.Rot2(np.arctan2(rel_pos[1], rel_pos[0]) + noise[0])
+        r = np.linalg.norm(rel_pos) + noise[1]
+        return gtsam.BearingRangeFactor2D(pose_key, landmark_key, b, r, noise_model)
+
+
+def add_landmark_measurements(
+    landmarks,
+    seen_landmarks,
+    rid,
+    stamp,
+    graphs,
+    factor_types,
+    new_est_vals,
+    new_est_types,
+    new_gt_vals,
+    new_gt_types,
+    landmark_measurement_noise_model,
+    landmark_measurement_noise_gen,
+    gt_poses,
+    est_poses,
+    args,
+):
+    if args.landmark_measurement_type == "range":
+        measure_type_tag = jrl.RangeFactor2DTag
+    elif args.landmark_measurement_type == "bearing_range":
+        measure_type_tag = jrl.BearingRangeFactor2DTag
+
+    key = gtsam.symbol(rid, stamp)
+    pose = gt_poses.atPose2(key)
+
+    # Aggregate the landmarks that are in range
+    in_range_landmarks = []
+    for i in range(landmarks.shape[0]):
+        d = np.linalg.norm(pose.translation() - landmarks[i])
+        if d < args.landmark_measurement_range:
+            in_range_landmarks.append(i)
+
+    # Stop early if there are no landmarks to measure to
+    if len(in_range_landmarks) == 0:
+        return
+
+    # Select a random landmark to measure to
+    landmark_idx = random.choice(in_range_landmarks)
+    landmark_key = gtsam.Symbol("#", landmark_idx).key()
+
+    # Update for Robot B
+    graphs[rid].add(
+        make_loop_entry(
+            gt_poses,
+            key,
+            landmark_key,
+            landmark_measurement_noise_model,
+            landmark_measurement_noise_gen,
+            args.landmark_measurement_type,
+        )
+    )
+    factor_types[rid].append(measure_type_tag)
+
+    if landmark_idx not in seen_landmarks[rid]:
+        seen_landmarks[rid].append(landmark_idx)
+        new_est_vals[rid].insert(landmark_key, gt_poses.atPoint2(landmark_key))
+        new_est_types[rid][landmark_key] = jrl.Point2Tag
+
+        new_gt_vals[rid].insert(landmark_key, gt_poses.atPoint2(landmark_key))
+        new_gt_types[rid][landmark_key] = jrl.Point2Tag
+
+
+def make_dataset(args, dataset_count):
+    # Setup ID's for each robot
+    robots = []
+    for i in range(args.number_robots):
+        robots.append(ascii_letters[i])
+
+    # Setup the Dataset Builder
+    builder = jrl.DatasetBuilder(args.name + "_{:04d}".format(dataset_count), robots)
+
+    # Generate the Landmarks
+    landmarks = np.stack(
+        [
+            np.random.uniform(args.xlims[0], args.xlims[1], args.number_landmarks),
+            np.random.uniform(args.ylims[0], args.ylims[1], args.number_landmarks),
+        ]
+    ).T
+    print(landmarks)
+
+    # Setup the noise Models
+    odom_noise_model = gtsam.noiseModel.Diagonal.Sigmas(
+        [
+            args.odom_noise_sigmas[0],
+            args.odom_noise_sigmas[1],
+            np.deg2rad(args.odom_noise_sigmas[2]),
+        ]
+    )
+
+    def odom_noise_gen():
+        return gtsam.Pose2(
+            np.random.normal(0, args.odom_noise_sigmas[0]),
+            np.random.normal(0, args.odom_noise_sigmas[1]),
+            np.random.normal(0, np.deg2rad(args.odom_noise_sigmas[2])),
+        )
+
+    def init_noise_gen():
+        return gtsam.Pose2(
+            np.random.normal(0, args.initialization_noise_sigmas[0]),
+            np.random.normal(0, args.initialization_noise_sigmas[1]),
+            np.random.normal(0, np.deg2rad(args.initialization_noise_sigmas[2])),
+        )
+
+    if args.landmark_measurement_type == "range":
+        landmark_measurement_noise_model = gtsam.noiseModel.Diagonal.Sigmas(
+            [args.landmark_measurement_noise_sigmas[0]]
+        )
+    elif args.landmark_measurement_type == "bearing_range":
+        landmark_measurement_noise_model = gtsam.noiseModel.Diagonal.Sigmas(
+            [
+                np.deg2rad(args.landmark_measurement_noise_sigmas[0]),
+                args.landmark_measurement_noise_sigmas[1],
+            ]
+        )
+    else:
+        raise RuntimeError("Invalid landmark_measurement_type provided")
+
+    def landmark_measurement_noise_gen():
+        if args.landmark_measurement_type == "range":
+            return np.random.normal(0, args.landmark_measurement_noise_sigmas[0])
+        elif args.landmark_measurement_type == "bearing_range":
+            return np.array(
+                [
+                    np.random.normal(
+                        0, np.deg2rad(args.landmark_measurement_noise_sigmas[0])
+                    ),
+                    np.random.normal(0, args.landmark_measurement_noise_sigmas[1]),
+                ]
+            )
+
+    # Setup the Odometry Model:
+    def gen_odom(pose):
+        i = np.random.choice([0, 1, 2], p=args.odom_probs)
+        if pose.x() < args.xlims[0]:
+            return pose.inverse().compose(gtsam.Pose2(args.xlims[0], pose.y(), 0))
+        elif pose.x() > args.xlims[1]:
+            return pose.inverse().compose(gtsam.Pose2(args.xlims[1], pose.y(), np.pi))
+        elif pose.y() < args.ylims[0]:
+            return pose.inverse().compose(
+                gtsam.Pose2(pose.x(), args.ylims[0], np.pi / 2.0)
+            )
+        elif pose.y() > args.ylims[1]:
+            return pose.inverse().compose(
+                gtsam.Pose2(pose.x(), args.ylims[1], -np.pi / 2.0)
+            )
+
+        if args.odom_type == "gridworld":
+            return ODOM_OPTIONS_GRIDWORLD[i]
+        elif args.odom_type == "contworld":
+            return ODOM_OPTIONS_CONTINUOUS[i]
+        else:
+            raise RuntimeError("Invalid Odometry Type: {}".format(args.odom_type))
+
+    stamp = 0
+    gtvals = gtsam.Values()
+    initvals = gtsam.Values()
+
+    for i, lpos in enumerate(landmarks):
+        gtvals.insert(gtsam.Symbol("#", i).key(), lpos)
+
+    builder, gtvals, initvals = add_priors(
+        builder, robots, stamp, 0, gtvals, initvals, args
+    )
+    seen_landmarks = {}
+    for rid in robots:
+        seen_landmarks[rid] = []
+
+    for pose_num in range(1, args.number_poses):
+        stamp += 1
+        print(stamp, "-----------------------------------------")
+
+        graphs = {}
+        factor_types = {}
+        new_est_vals = {}
+        new_est_types = {}
+        new_gt_vals = {}
+        new_gt_types = {}
+
+        for rid in robots:
+            graphs[rid] = gtsam.NonlinearFactorGraph()
+            factor_types[rid] = []
+            new_est_vals[rid] = gtsam.Values()
+            new_est_types[rid] = {}
+            new_gt_vals[rid] = gtsam.Values()
+            new_gt_types[rid] = {}
+
+        # First generate odometry
+        for rid in robots:
+            add_odom_step(
+                rid,
+                graphs,
+                factor_types,
+                new_est_vals,
+                new_est_types,
+                new_gt_vals,
+                new_gt_types,
+                stamp,
+                odom_noise_model,
+                odom_noise_gen,
+                gen_odom,
+                gtvals,
+                initvals,
+                init_noise_gen,
+                args,
+            )
+
+            # finally generate inter-robot measurements
+            add_landmark_measurements(
+                landmarks,
+                seen_landmarks,
+                rid,
+                stamp,
+                graphs,
+                factor_types,
+                new_est_vals,
+                new_est_types,
+                new_gt_vals,
+                new_gt_types,
+                landmark_measurement_noise_model,
+                landmark_measurement_noise_gen,
+                gtvals,
+                initvals,
+                args,
+            )
+
+        for rid in robots:
+            builder.addEntry(
+                rid,
+                stamp,
+                graphs[rid],
+                factor_types[rid],
+                {},
+                jrl.TypedValues(new_est_vals[rid], new_est_types[rid]),
+                jrl.TypedValues(new_gt_vals[rid], new_gt_types[rid]),
+            )
+
+    dataset = builder.build()
+    writer = jrl.Writer()
+    writer.writeDataset(
+        dataset,
+        os.path.join(args.output_dir, args.name + "_{:04d}.jrl".format(dataset_count)),
+        False,
+    )
+
+
+def main():
+    args = handle_args()
+    for i in range(args.repeats):
+        print(i)
+        make_dataset(args, i)
+
+
+if __name__ == "__main__":
+    main()

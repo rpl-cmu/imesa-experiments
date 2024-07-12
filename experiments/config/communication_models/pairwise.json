@@ -1,0 +1,7 @@
+{
+  "communication_range": 30,
+  "max_communication_partners": 1,
+  "communication_rate": 1,
+  "rounds_per_comm_step": 1,
+  "success_prob": 0.9
+}

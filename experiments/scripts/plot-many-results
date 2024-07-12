@@ -1,0 +1,154 @@
+#!/usr/bin/env python
+import argparse
+import os
+import sys
+
+import jrl
+import gtsam
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from helpers.plot_trajectories import plot_traj_3d, plot_traj_2d
+from helpers.parsing import read_results_all
+from helpers.method_style_sheet import METHOD_STYLE_SHEET
+
+
+plt.rcParams["font.family"] = "Times New Roman"
+plt.rcParams["mathtext.fontset"] = "cm"
+plt.rcParams["pdf.fonttype"] = 42
+
+
+def handle_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--input_dataset",
+        "-d",
+        type=str,
+        required=True,
+        help="The input jrl file",
+    )
+
+    parser.add_argument(
+        "--result_directories",
+        "-r",
+        type=str,
+        nargs="+",
+        required=True,
+        help="The directories containing results",
+    )
+
+    parser.add_argument(
+        "--grid",
+        "-g",
+        type=int,
+        nargs="+",
+        required=True,
+        help="Grid size for the results [H, W]",
+    )
+
+    parser.add_argument(
+        "--linear",
+        "-l",
+        action="store_true",
+        help="Whether or not the dataset is Linear",
+    )
+
+    parser.add_argument(
+        "--is3d",
+        action="store_true",
+        help="Whether or not the dataset is 3d",
+    )
+
+    parser.add_argument(
+        "--output_to", type=str, help="Location to save figures", default=None
+    )
+
+    return parser.parse_args()
+
+
+def main():
+    args = handle_args()
+    parser = jrl.Parser()
+    dataset = parser.parseDataset(args.input_dataset, False)
+    colors = sns.color_palette("hls", len(dataset.robots()))
+
+    # Get the results for all methods
+    method_results = {}
+    result_len = 0
+    for rdir in args.result_directories:
+        results = read_results_all(rdir)
+        method_results[results[0].method_name] = results
+        if result_len == 0:
+            result_len = len(results)
+
+    xlims, ylims = [], []
+    for result_iter_count in range(result_len):
+        H, W = args.grid
+        fig, axes = plt.subplots(H, W, figsize=[8, 4.5], dpi=200, squeeze=False)
+
+        indicies = []
+        for i in range(H):
+            for j in range(W):
+                if args.is3d:
+                    axes[i, j].remove()
+                    axes[i, j] = fig.add_subplot(H, W, len(indicies), projection="3d")
+                    axes[i, j].view_init(30, 60)
+                indicies.append([i, j])
+
+        for i, (method_name, result_list) in enumerate(method_results.items()):
+            r, c = indicies[i]
+            axes[r, c].set_title(METHOD_STYLE_SHEET[method_name]["name"])
+            if args.is3d:
+                plot_traj_3d(
+                    axes[r, c],
+                    dataset,
+                    result_list[result_iter_count],
+                    colors,
+                    include_shared_vars=False,
+                    include_gt=True,
+                )
+            else:
+                plot_traj_2d(
+                    axes[r, c],
+                    dataset,
+                    result_list[result_iter_count],
+                    colors,
+                    include_shared_vars=False,
+                    include_gt=True,
+                    linear=args.linear,
+                )
+
+            if result_iter_count == 0:
+                xlims.append(axes[r, c].get_xlim())
+                ylims.append(axes[r, c].get_ylim())
+            else:
+                axes[r, c].set_xlim(xlims[i])
+                axes[r, c].set_ylim(ylims[i])
+
+        for i in range(H):
+            for j in range(W):
+                count = i * W + j
+                if count >= len(method_results):
+                    axes[i, j].remove()
+                else:
+                    axes[i, j].set_aspect("equal")
+                    axes[i, j].set_xticklabels([])
+                    axes[i, j].set_yticklabels([])
+                    axes[i, j].set_xticks([])
+                    axes[i, j].set_yticks([])
+
+        fig.tight_layout(pad=0.25)
+        if args.output_to is not None:
+            plt.savefig(
+                os.path.join(
+                    args.output_to,
+                    "{:05d}.png".format(result_iter_count),
+                )
+            )
+            plt.close()
+        else:
+            plt.show()
+
+
+if __name__ == "__main__":
+    main()  #

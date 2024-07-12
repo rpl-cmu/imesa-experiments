@@ -1,0 +1,6 @@
+{
+  "pose_biased_prior_type": "GEODESIC",
+  "initial_penalty_param": 0.001,
+  "penalty_param": 1,
+  "shared_var_wildfire_threshold": 0.0
+}

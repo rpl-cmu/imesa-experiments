@@ -1,0 +1,245 @@
+#!/usr/bin/env python
+import argparse
+import os
+
+import jrl
+import gtsam
+import numpy as np
+import matplotlib.pyplot as plt
+from helpers.method_style_sheet import METHOD_STYLE_SHEET
+from matplotlib.collections import LineCollection
+from matplotlib.cm import ScalarMappable
+import glob
+import pickle
+
+
+plt.rcParams["font.family"] = "Times New Roman"
+plt.rcParams["mathtext.fontset"] = "cm"
+plt.rcParams["pdf.fonttype"] = 42
+
+
+def handle_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--input_dataset",
+        "-d",
+        type=str,
+        required=True,
+        help="The input jrl file",
+    )
+
+    parser.add_argument(
+        "--result_directories",
+        "-r",
+        type=str,
+        nargs="+",
+        required=True,
+        help="The directories containing results",
+    )
+
+    parser.add_argument(
+        "--grid",
+        "-g",
+        type=int,
+        nargs="+",
+        required=True,
+        help="Grid size for the results [H, W]",
+    )
+
+    parser.add_argument(
+        "--norm",
+        "-n",
+        type=float,
+        nargs="+",
+        default=None,
+        help="The min and max error values for normalization [min, max]",
+    )
+
+    parser.add_argument(
+        "--plot_cbar",
+        "-pc",
+        action="store_true",
+        help="Whether or not to plot initialization",
+    )
+
+    parser.add_argument(
+        "--output_to", type=str, help="Location to save figures", default=None
+    )
+
+    return parser.parse_args()
+
+
+def plot_traj_error_2d(ax, results, min_error, max_error):
+    robot_pts, robot_errs = results
+
+    for traj_points, pose_errors in zip(robot_pts, robot_errs):
+        xy = np.stack(traj_points).reshape(-1, 1, 2)
+        coll = LineCollection(
+            np.hstack([xy[:-1], xy[1:]]),
+            cmap="jet",
+            norm=plt.Normalize(min_error, max_error),
+            linewidth=0.8,
+        )
+        coll.set_array(pose_errors[1:])
+        ax.add_collection(coll)
+        ax.autoscale_view()
+
+
+def plot_gt(ax, dataset):
+    for idx, robot in enumerate(dataset.robots()):
+        gtx, gty = [], []
+        gtvals = dataset.groundTruth(robot)
+        for k in gtvals.keys():
+            s = gtsam.Symbol(k)
+            if chr(s.chr()) == robot:
+                p = gtvals.atPose2(k)
+                gtx.append(p.x())
+                gty.append(p.y())
+        ax.plot(gtx, gty, alpha=0.4, color="gray", linewidth=0.8)
+
+
+def parse_pts_and_err(dataset, results):
+    robot_pts, robot_errs = [], []
+    for idx, robot in enumerate(dataset.robots()):
+        gtvals = dataset.groundTruth(robot)
+        pts = []
+        err = []
+        svals = results.robot_solutions[robot].values
+        for k in svals.keys():
+            s = gtsam.Symbol(k)
+            if chr(s.chr()) == robot:
+                p = svals.atPose2(k)
+                e = np.linalg.norm(gtvals.atPose2(k).localCoordinates(p))
+                pts.append(p.translation())
+                err.append(e)
+        robot_pts.append(pts)
+        robot_errs.append(err)
+    return robot_pts, robot_errs
+
+
+def read_results_all(dataset, result_dir):
+    parser = jrl.Parser()
+    results = []
+    name = None
+    min_errs = []
+    max_errs = []
+
+    # Aggregate all the metric summary files
+    result_files = sorted(glob.glob(os.path.join(result_dir, "iterations", "*.jrr*")))
+    result_files.append(os.path.join(result_dir, "final_results.jrr.cbor"))
+
+    for rf in result_files:
+        if os.path.isfile(rf):
+            jrl_results = parser.parseResults(rf, True)
+            if name is None:
+                name = jrl_results.method_name
+
+            robot_pts, robot_errs = parse_pts_and_err(dataset, jrl_results)
+            if "independent" not in result_dir:
+                for rerr in robot_errs:
+                    min_errs.append(min(rerr))
+                    max_errs.append(max(rerr))
+            results.append((robot_pts, robot_errs))
+        else:
+            raise "Error read_results_all could not parse an iteration or final results file"
+    return name, results, min_errs, max_errs
+
+
+def main():
+    args = handle_args()
+    parser = jrl.Parser()
+    dataset = parser.parseDataset(args.input_dataset, False)
+
+    method_results = {}
+    min_errs, max_errs = [], []
+    result_len = 0
+    for rdir in args.result_directories:
+        name, results, mine, maxe = read_results_all(dataset, rdir)
+        method_results[name] = results
+
+        min_errs.append(np.array(mine))
+        max_errs.append(np.array(maxe))
+        if result_len == 0:
+            result_len = len(results)
+
+    # Get the results for all methods
+    if args.norm is None:
+        min_errs, max_errs = np.concatenate(min_errs), np.concatenate(max_errs)
+        MIN, MAX = np.min(min_errs), np.max(max_errs)
+    else:
+        MIN, MAX = args.norm
+
+    xlims, ylims = [], []
+    for result_iter_count in range(result_len):
+        H, W = args.grid
+        fig, axes = plt.subplots(
+            H, W, figsize=[5, 5], dpi=200, squeeze=False, layout="compressed"
+        )
+
+        indicies = []
+        for i in range(H):
+            for j in range(W):
+                indicies.append([i, j])
+
+        for i, (method_name, result_list) in enumerate(method_results.items()):
+            r, c = indicies[i]
+            axes[r, c].set_title(METHOD_STYLE_SHEET[method_name]["name"])
+
+            plot_gt(axes[r, c], dataset)
+            plot_traj_error_2d(axes[r, c], result_list[result_iter_count], MIN, MAX)
+
+            if result_iter_count == 0:
+                xlims.append(axes[r, c].get_xlim())
+                ylims.append(axes[r, c].get_ylim())
+            else:
+                axes[r, c].set_xlim(xlims[i])
+                axes[r, c].set_ylim(ylims[i])
+
+        for i in range(H):
+            for j in range(W):
+                count = i * W + j
+                if count >= len(method_results):
+                    axes[i, j].remove()
+                else:
+                    axes[i, j].set_aspect("equal")
+                    axes[i, j].set_xticklabels([])
+                    axes[i, j].set_yticklabels([])
+                    axes[i, j].set_xticks([])
+                    axes[i, j].set_yticks([])
+
+        if args.plot_cbar:
+            print("Normalization:", MIN, MAX)
+            cbar = fig.colorbar(
+                ScalarMappable(cmap="jet", norm=plt.Normalize(MIN, MAX)),
+                ax=axes.ravel().tolist(),
+            )
+            ticks = cbar.ax.get_yticks().tolist()
+            labels = cbar.ax.get_yticklabels()
+            ticks[-1] = MAX
+            labels[-1] = ">{:.2f}".format(MAX)
+            cbar.ax.set_yticks(ticks)
+            cbar.ax.set_yticklabels(labels)
+        # fig.tight_layout(pad=0.25)
+        if args.output_to is not None:
+            plt.savefig(
+                os.path.join(
+                    args.output_to,
+                    "{:05d}.png".format(result_iter_count),
+                )
+            )
+            if result_iter_count == result_len - 1:
+                for i in range(10):
+                    plt.savefig(
+                        os.path.join(
+                            args.output_to,
+                            "{:05d}.png".format(result_iter_count + i),
+                        )
+                    )
+
+            plt.close()
+        else:
+            plt.show()
+
+
+if __name__ == "__main__":
+    main()  #

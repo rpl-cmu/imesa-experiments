@@ -1,0 +1,121 @@
+#!/usr/bin/env python
+import argparse
+import json
+import os
+
+import jrl
+import matplotlib.pyplot as plt
+import numpy as np
+from helpers.method_style_sheet import METHOD_STYLE_SHEET
+
+"""
+##     ##    ###    #### ##    ## 
+###   ###   ## ##    ##  ###   ## 
+#### ####  ##   ##   ##  ####  ## 
+## ### ## ##     ##  ##  ## ## ## 
+##     ## #########  ##  ##  #### 
+##     ## ##     ##  ##  ##   ### 
+##     ## ##     ## #### ##    ## 
+"""
+
+
+def handle_args():
+    parser = argparse.ArgumentParser("Plot timing results.")
+    parser.add_argument(
+        "-d",
+        "--dataset_file",
+        type=str,
+        required=True,
+        help="Dataset File",
+    )
+    parser.add_argument(
+        "-r",
+        "--result_dirs",
+        type=str,
+        required=True,
+        nargs="+",
+        help="List of result directories",
+    )
+    parser.add_argument(
+        "-w",
+        "--window",
+        type=float,
+        default=50,
+        help="The window used for smoothing",
+    )
+    return parser.parse_args()
+
+
+def main():
+    args = handle_args()
+    parser = jrl.Parser()
+    dataset = parser.parseDataset(args.dataset_file, False)
+    fig, axes = plt.subplots(len(dataset.robots()), 1, figsize=(6, 8))
+
+    # Get the accumulated time for each entry of each robot
+    elapsed_times = {}
+    for i, rid in enumerate(dataset.robots()):
+        elapsed_times[rid] = []
+        start_stamp = dataset.measurements(rid)[0].stamp / 1000.0  # Convert to seconds
+        for entry in dataset.measurements(rid):
+            elapsed_times[rid].append(
+                (entry.stamp / 1000.0) - start_stamp
+            )  # Convert to seconds since start
+
+        axes[i].plot(elapsed_times[rid], elapsed_times[rid], color="black")
+
+    for rdir in args.result_dirs:
+        timing_file = os.path.join(rdir, "robot_iteration_runtimes.json")
+        final_metric_file = os.path.join(rdir, "final_metrics.jrm.cbor")
+        final_metric_summary = parser.parseMetricSummary(final_metric_file, True)
+        name = final_metric_summary.method_name
+
+        with open(timing_file) as f:
+            robot_times = json.load(f)
+            if "centralized" not in timing_file:
+                # Parse out the timing information and average across robots
+                for i, (robot, times) in enumerate(robot_times.items()):
+                    # Smooth the results
+                    times = np.array(times) * 1e-9  # Convert to seconds
+                    cumulative = np.cumsum(times)
+                    axes[i].plot(
+                        elapsed_times[robot],
+                        cumulative,
+                        label=METHOD_STYLE_SHEET[name]["name"],
+                        color=METHOD_STYLE_SHEET[name]["color"],
+                        linestyle=METHOD_STYLE_SHEET[name]["linestyle"],
+                    )
+            else:
+                # Special case for centralzied
+                all_times = []
+                for i, (robot, times) in enumerate(robot_times.items()):
+                    for j, run_time in enumerate(times):
+                        all_times.append((elapsed_times[robot][j], run_time))
+                all_times.sort(key=lambda x: x[0])
+                all_runtimes = []
+                all_elapsed_times = []
+                for et, rt in all_times:
+                    all_runtimes.append(rt)
+                    all_elapsed_times.append(et)
+                cumulative = np.cumsum(all_runtimes)
+                for i in range(len(dataset.robots())):
+                    axes[i].plot(
+                        all_elapsed_times,
+                        cumulative * 1e-9,
+                        label=METHOD_STYLE_SHEET[name]["name"],
+                        color=METHOD_STYLE_SHEET[name]["color"],
+                        linestyle=METHOD_STYLE_SHEET[name]["linestyle"],
+                    )
+
+    # Format Axes
+    axes[0].set_xlabel("Iterations")
+    axes[0].set_ylabel("Update Time (s)")
+    axes[0].legend(fontsize="small")  # (loc="center left", bbox_to_anchor=(1, 0.5)))
+
+    fig.tight_layout(pad=0.25)
+    fig.tight_layout(pad=0.25)
+    plt.show()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,5 @@
+{
+  "prior_shared_variables": false,
+  "shared_variable_prior_sigma": 1e2,
+  "map_summary_initial_sigma": 10
+}

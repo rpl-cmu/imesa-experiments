@@ -1,0 +1,142 @@
+#!/usr/bin/env python
+import argparse
+import glob
+import os
+
+import jrl
+import matplotlib.pyplot as plt
+import numpy as np
+from helpers.method_style_sheet import METHOD_STYLE_SHEET
+from helpers.parsing import read_results_metrics_all
+from matplotlib.ticker import Locator
+
+plt.rcParams["font.family"] = "Times New Roman"
+plt.rcParams["mathtext.fontset"] = "cm"
+plt.rcParams["pdf.fonttype"] = 42
+
+
+class MinorSymLogLocator(Locator):
+    """
+    Dynamically find minor tick positions based on the positions of
+    major ticks for a symlog scaling.
+    """
+
+    def __init__(self, linthresh):
+        """
+        Ticks will be placed between the major ticks.
+        The placement is linear for x between -linthresh and linthresh,
+        otherwise its logarithmically
+        """
+        self.linthresh = linthresh
+
+    def __call__(self):
+        "Return the locations of the ticks"
+        majorlocs = self.axis.get_majorticklocs()
+
+        # iterate through minor locs
+        minorlocs = []
+
+        # handle the lowest part
+        for i in range(1, len(majorlocs)):
+            majorstep = majorlocs[i] - majorlocs[i - 1]
+            if abs(majorlocs[i - 1] + majorstep / 2) < self.linthresh:
+                ndivs = 10
+            else:
+                ndivs = 9
+            minorstep = majorstep / ndivs
+            locs = np.arange(majorlocs[i - 1], majorlocs[i], minorstep)[1:]
+            minorlocs.extend(locs)
+
+        return self.raise_if_exceeds(np.array(minorlocs))
+
+    def tick_values(self, vmin, vmax):
+        raise NotImplementedError(
+            "Cannot get tick locations for a " "%s type." % type(self)
+        )
+
+
+def handle_args():
+    parser = argparse.ArgumentParser(
+        description="Compares the convergence of multiple results on a single dataset"
+    )
+    parser.add_argument(
+        "--dataset_file",
+        "-d",
+        help="Path to the jrl dataset file",
+        required=True,
+    )
+    parser.add_argument(
+        "--method_result_dirs",
+        "-r",
+        type=str,
+        nargs="+",
+        help="Directories of method results.",
+        default=[],
+    )
+    parser.add_argument(
+        "--title",
+        "-t",
+        type=str,
+        help="Title For the Plot",
+        default="",
+    )
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    args = handle_args()
+    parser = jrl.Parser()
+    # Load the dataset
+    dataset = parser.parseDataset(args.dataset_file, False)
+
+    # Lets setup the figure
+    fig, axes = plt.subplots(3, 1, figsize=(6, 8), height_ratios=[1.5, 1, 1])
+
+    for mthd_result_dir in args.method_result_dirs:
+        iterations, metrics = read_results_metrics_all(mthd_result_dir)
+        name = metrics[0].method_name
+        residual = []
+        ate_trans, ate_rot = [], []
+
+        for ms in metrics:
+            if ms.total_ate[0] < np.inf and ms.total_ate[0] != np.NaN:
+                residual.append(ms.mean_residual)
+                ate_trans.append(ms.total_ate[0])
+                ate_rot.append(ms.total_ate[1])
+        print("{}: {}".format(name, residual[-1]))
+
+        for i, results in enumerate([residual, ate_trans, ate_rot]):
+            axes[i].plot(
+                iterations,
+                results,
+                label=METHOD_STYLE_SHEET[name]["name"],
+                color=METHOD_STYLE_SHEET[name]["color"],
+                linestyle=METHOD_STYLE_SHEET[name]["linestyle"],
+            )
+
+
+    # Mean Residual
+    axes[0].set_ylabel("Mean Residual")
+    axes[0].set_xlabel("Iteration")
+    axes[0].set_yscale("symlog", linthresh=10)
+    axes[0].yaxis.set_minor_locator(MinorSymLogLocator(1e1))
+    axes[0].grid(b=True, which="major", axis="both")
+    axes[0].grid(b=True, which="both", axis="y")
+
+    
+    # ATE (Translation)
+    axes[1].set_ylabel("ATE (translation)")
+    axes[1].set_xlabel("Iteration")
+    axes[1].grid(b=True, which="both")
+
+    # ATE (Rotation)
+    axes[2].set_ylabel("ATE (Rotation)")
+    axes[2].set_xlabel("Iteration")
+    axes[2].grid(b=True, which="both")
+
+    plt.suptitle(args.title, y=1, size=16)
+    axes[0].legend(fontsize="small") #(loc="center left", bbox_to_anchor=(1, 0.5))
+
+    fig.tight_layout(pad=0.25)
+    fig.tight_layout(pad=0.25)
+    plt.show()

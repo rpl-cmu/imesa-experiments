@@ -1,0 +1,114 @@
+#!/usr/bin/env python
+import argparse
+import json
+import os
+
+import jrl
+import matplotlib.pyplot as plt
+import numpy as np
+from helpers.method_style_sheet import METHOD_STYLE_SHEET
+
+"""
+##     ##    ###    #### ##    ## 
+###   ###   ## ##    ##  ###   ## 
+#### ####  ##   ##   ##  ####  ## 
+## ### ## ##     ##  ##  ## ## ## 
+##     ## #########  ##  ##  #### 
+##     ## ##     ##  ##  ##   ### 
+##     ## ##     ## #### ##    ## 
+"""
+
+
+def handle_args():
+    parser = argparse.ArgumentParser("Plot timing results.")
+    parser.add_argument(
+        "-r",
+        "--result_dirs",
+        type=str,
+        required=True,
+        nargs="+",
+        help="List of result directories",
+    )
+    parser.add_argument(
+        "-w",
+        "--window",
+        type=int,
+        default=50,
+        help="The window used for smoothing",
+    )
+    return parser.parse_args()
+
+
+def main():
+    args = handle_args()
+    fig, axes = plt.subplots(2, 1, figsize=(6, 8))
+    parser = jrl.Parser()
+
+    for rdir in args.result_dirs:
+        timing_file = os.path.join(rdir, "robot_iteration_runtimes.json")
+        final_metric_file = os.path.join(rdir, "final_metrics.jrm.cbor")
+        final_metric_summary = parser.parseMetricSummary(final_metric_file, True)
+        name = final_metric_summary.method_name
+
+        with open(timing_file) as f:
+            # Parse out the timing information and average across robots
+            robot_times = json.load(f)
+            avg_times = np.zeros_like(list(robot_times.values())[0])
+            for robot, times in robot_times.items():
+                avg_times += np.array(times) * 1e-9  # convert from ns to s
+
+            if "centralized" not in name:
+                # average results except centralized
+                avg_times = avg_times / len(robot_times)
+
+            # Smooth the results
+            augmented_average_times = np.concatenate(
+                (avg_times, np.array([avg_times[-1]] * (args.window - 1)))
+            )
+            smoothed_avg_times = np.convolve(
+                augmented_average_times,
+                np.ones(args.window) / float(args.window),
+                mode="valid",
+            )
+
+            # Accumulate the iteration times
+            cumulative_time = np.cumsum(avg_times)
+
+            # Define x-axis
+            iters = np.arange(avg_times.shape[0])
+
+            # Plot the results
+            axes[0].plot(
+                iters,
+                smoothed_avg_times,
+                label=METHOD_STYLE_SHEET[name]["name"],
+                color=METHOD_STYLE_SHEET[name]["color"],
+                linestyle=METHOD_STYLE_SHEET[name]["linestyle"],
+            )
+            axes[0].plot(
+                iters, avg_times, color=METHOD_STYLE_SHEET[name]["color"], alpha=0.3
+            )
+
+            axes[1].plot(
+                iters,
+                cumulative_time,
+                label=METHOD_STYLE_SHEET[name]["name"],
+                color=METHOD_STYLE_SHEET[name]["color"],
+                linestyle=METHOD_STYLE_SHEET[name]["linestyle"],
+            )
+
+    # Format Axes
+    axes[0].set_xlabel("Iterations")
+    axes[0].set_ylabel("Update Time (s)")
+    axes[0].legend(fontsize="small")  # (loc="center left", bbox_to_anchor=(1, 0.5)))
+
+    axes[1].set_xlabel("Iterations")
+    axes[1].set_ylabel("Cumulative Time (s)")
+
+    fig.tight_layout(pad=0.25)
+    fig.tight_layout(pad=0.25)
+    plt.show()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,167 @@
+#!/usr/bin/env python
+import argparse
+import os
+import sys
+import random
+
+import jrl
+import gtsam
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.patches as pch
+import seaborn as sns
+
+plt.rcParams["font.family"] = "Times New Roman"
+plt.rcParams["mathtext.fontset"] = "cm"
+plt.rcParams["pdf.fonttype"] = 42
+
+ROBOT_TRI = np.array([[-0.1, 0.25, -0.1], [0.1, 0.0, -0.1], [1, 1, 1]])
+
+
+def handle_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("input", type=str, help="The input jrl file")
+    parser.add_argument(
+        "--output", "-o", type=str, help="location to output the timestamp files"
+    )
+    parser.add_argument(
+        "--xlims", nargs="+", type=float, help="xlimits for plot or none", default=None
+    )
+    parser.add_argument(
+        "--ylims", nargs="+", type=float, help="ylimits for plot or none", default=None
+    )
+    return parser.parse_args()
+
+
+def plot_variable(ax, robot_idx, key, pose):
+    sym = gtsam.Symbol(key)
+    style = "dotted" if ROBOTS[robot_idx] != chr(sym.chr()) else "solid"
+    fill = "none" if ROBOTS[robot_idx] != chr(sym.chr()) else "white"
+    zord = 3 if ROBOTS[robot_idx] != chr(sym.chr()) else 2
+
+    variable_patch = pch.Circle(
+        (pose.x(), pose.y()),
+        radius=0.07,
+        edgecolor=COLORS[robot_idx],
+        facecolor=fill,
+        zorder=zord,
+        linestyle=style,
+    )
+    ax.add_patch(variable_patch)
+    if ROBOTS[robot_idx] == chr(sym.chr()):
+        ax.annotate(
+            "${}_{}$".format(chr(sym.chr()), sym.index()),
+            xy=(pose.x(), pose.y()),
+            fontsize=6,
+            horizontalalignment="center",
+            verticalalignment="center",
+            zorder=5,
+        )
+
+
+def plot_between_factor(ax, robot_idx, pose1, pose2):
+    loc = ((pose1.x() + pose2.x()) / 2.0, (pose1.y() + pose2.y()) / 2.0)
+
+    ax.plot(
+        [pose1.x(), pose2.x()],
+        [pose1.y(), pose2.y()],
+        color=COLORS[robot_idx],
+        zorder=1,
+    )
+    factor_patch = pch.Circle(
+        loc,
+        radius=0.03,
+        edgecolor=COLORS[robot_idx],
+        facecolor=COLORS[robot_idx],
+        zorder=2,
+    )
+    ax.add_patch(factor_patch)
+
+
+def plot_prior_factor(ax, robot_idx, pose):
+    ax.plot(
+        [pose.x(), pose.x()],
+        [pose.y(), pose.y() - 0.25],
+        color=COLORS[robot_idx],
+        zorder=1,
+    )
+    factor_patch = pch.Circle(
+        (pose.x(), pose.y() - 0.25),
+        radius=0.03,
+        edgecolor=COLORS[robot_idx],
+        facecolor=COLORS[robot_idx],
+        zorder=2,
+    )
+    ax.add_patch(factor_patch)
+
+
+def plot_robot(ax, robot_idx, pose):
+    M = pose.matrix()
+    pts = (M @ ROBOT_TRI)[0:2, :]
+    robot_patch = pch.Polygon(
+        pts.T,
+        closed=True,
+        edgecolor=COLORS[robot_idx],
+        facecolor="white",
+        zorder=6,
+    )
+    ax.add_patch(robot_patch)
+
+
+def main():
+    args = handle_args()
+    parser = jrl.Parser()
+    dataset = parser.parseDataset(args.input, False)
+    global COLORS
+    COLORS = sns.color_palette("hls", len(dataset.robots()))
+    random.shuffle(COLORS)
+
+    global ROBOTS
+    ROBOTS = dataset.robots()
+
+    dataset_len = len(dataset.measurements("a"))
+    for iter_num in range(dataset_len):
+        # Generate the Figure
+        fig = plt.figure(dpi=200, figsize=[3, 3])
+        ax = plt.gca()
+        ax.set_xticklabels([])
+        ax.set_yticklabels([])
+        ax.set_aspect("equal")
+        ax.set_axis_off()
+        if args.xlims:
+            ax.set_xlim(args.xlims)
+
+        if args.xlims:
+            ax.set_xlim(args.xlims)
+        # For each robot at this iteration
+        for robot_idx, rid in enumerate(ROBOTS):
+            entries = dataset.measurements(rid)
+            groundtruth = dataset.groundTruth(rid)
+
+            # Plot the measurements as a factor graph up to this iter
+            for i in range(iter_num + 1):
+                for j in range(entries[i].measurements.nrFactors()):
+                    factor = entries[i].measurements.at(j)
+
+                    if isinstance(factor, gtsam.PriorFactorPose2):
+                        key = factor.keys()[0]
+                        pose = groundtruth.atPose2(key)
+                        plot_prior_factor(ax, robot_idx, pose)
+                        plot_variable(ax, robot_idx, key, pose)
+
+                    if isinstance(factor, gtsam.BetweenFactorPose2):
+                        key1, key2 = factor.keys()
+                        p1, p2 = groundtruth.atPose2(key1), groundtruth.atPose2(key2)
+                        plot_between_factor(ax, robot_idx, p1, p2)
+                        plot_variable(ax, robot_idx, key2, p2)
+
+            plot_robot(ax, robot_idx, groundtruth.atPose2(gtsam.symbol(rid, iter_num)))
+
+        plt.tight_layout(pad=0.25)
+        plt.savefig(os.path.join(args.output, "{}_{}.png".format(dataset.name(), iter_num)))
+        print(ax.get_xlim(), ax.get_ylim())
+        plt.show()
+
+
+if __name__ == "__main__":
+    main()
