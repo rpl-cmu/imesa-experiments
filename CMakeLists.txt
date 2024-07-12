@@ -12,8 +12,7 @@ include_directories(${GTSAM_INCLUDE_DIR})
 include(FetchContent)
 FetchContent_Declare(
   imesa
-  GIT_REPOSITORY  git@github.com:rpl-cmu/imesa.git
-  #GIT_REPOSITORY  https://github.com/rpl-cmu/imesa.git # TODO switch to HTTPS when iMESA is public
+  GIT_REPOSITORY  https://github.com/rpl-cmu/imesa.git
   GIT_TAG         main
 )
 FetchContent_MakeAvailable(imesa)

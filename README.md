@@ -1,7 +1,7 @@
 # iMESA Experiments
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) 
 
-This repository houses the code + infrastructure + scripts to run the experiments found in our RSS 2024 paper "iMESA: Incremental Distributed Optimization for Collaborative Simultaneous Localization and Mapping" which can be found [TODO arXiv LINK](). If you use this package please cite our paper as:
+This repository houses the code + infrastructure + scripts to run the experiments found in our RSS 2024 paper "iMESA: Incremental Distributed Optimization for Collaborative Simultaneous Localization and Mapping" which can be found [arXiv](https://arxiv.org/pdf/2406.07371). If you use this package please cite our paper as:
 
 ```
 @inproceedings{mcgann_imesa_2024, 
