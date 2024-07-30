@@ -33,22 +33,45 @@ This repository currently provides implementations of a Centralized baseline, an
 
 A keen reader will notice that Distributed Loopy Belief Propagation (DLGBP) (an important comparison in the paper above) is missing from this list. The original authors of DLGBP were kind enough to provide us with their internal implementation of the algorithm to use in our experiments (Shoutout to Riku Murai for all their help!). However, as it was their internal implementation, it is not our place to release it. Therefore we have not included DLGBP in the public release of this repository.
 
-## Installation Instructions
+## Dependencies
+  * GTSAM - [Github](https://github.com/borglab/gtsam) - Factor-graph library for SLAM.
+  * nlohmann-json - [Github](https://github.com/nlohmann/json) - JSON library provides parsing/serializing of JSON.
+  * JRL - [Github](https://github.com/DanMcGann/jrl) - SLAM dataset library for IO of datasets and results.
+  * iMESA - [Github](https://github.com/rpl-cmu/imesa) - Implementation of the iMESA algorithm.
 
-The following installation instructions assume the user is working in Ubuntu 20.04. The project work under other development environments, but is untested.
+## Setup Instructions
 
-1. Install Dependencies
-  * GTSAM - See [GTSAM's Installation Documentation](https://github.com/borglab/gtsam/tree/develop?tab=readme-ov-file#quickstart)
+The following instructions are designed to construct a local build of iMESA experiments with the proper versions of dependencies. We link the projects to each other using `*_DIR` and `*_INCLUDE_DIR` CMake variables to ensure we build everything against the correct version, and permit users to have other versions of GTSAM or JRL installed on their system.
+
+
+1. Install System Dependencies
   * nlohmann-json - `sudo apt-get install nlohmann-json3-dev`
-  * JRL - See [JRL Installation Documentation](https://github.com/DanMcGann/jrl/blob/main/LIBRARY.md#install-instructions)
-  * Note: the [iMESA implementation](https://github.com/rpl-cmu/imesa) is automatically handled using FetchContent
-2. Clone this repository
-  * SSH:`clone git@github.com:rpl-cmu/imesa.git`
-  * HTTPS: `clone https://github.com/rpl-cmu/imesa.git`
-3. Build this project
-  * `mkdir build && cd build/`
+    * Note this is the only system-wide dependency. All other dependencies are handled locally to allow users to have other versions of GTSAM etc. installed on their machine.
+2. Construct a workspace directory
+  * `cd /path/to/prefered/location`
+  * `mkdir WORKSPACE`
+  * The following instructions will refer WORKSPACE as a path and users should insert the absolute path to their chosen workspace. 
+2. Build GTSAM
+  * `cd WORKSPACE`
+  * `git clone -b 4.2.0-imesa https://github.com/DanMcGann/gtsam.git`
+    * This version is GTSAM v4.2.0 with a few additional change that are detailed in the [iMESA repository](https://github.com/rpl-cmu/imesa).
+  * `cd gtsam && mkdir build && cd build`
   * `cmake ..`
   * `make`
+3. Build JRL
+  * `cd WORKSPACE`
+  * `git clone -b v1.0.0 https://github.com/DanMcGann/jrl.git`
+  * `cd jrl && mkdir build && cd build`
+  * `cmake .. -DGTSAM_DIR=WORKSPACE/gtsam/build -DGTSAM_INCLUDE_DIR=WORKSPACE/gtsam/gtsam`
+  * `make`
+4. Build the iMESA Experiments
+  * `cd WORKSPACE`
+  * `git clone https://github.com/rpl-cmu/imesa-experiments.git`
+  * `cd imesa-experiments && mkdir build && cd build`
+  * `cmake .. -DGTSAM_DIR=WORKSPACE/gtsam/build -DGTSAM_INCLUDE_DIR=WORKSPACE/gtsam/gtsam -Djrl_DIR=WORKSPACE/jrl/build -Djrl_INCLUDE_DIR=WORKSPACE/jrl/include`
+  * `make`
+
+Note: iMESA is included automatically via FetchContent.
 
 ## Issues
 If you encounter issues while using this project please file a bug report on github!
