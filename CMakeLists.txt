@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 message(STATUS "================  CMake iMESA Experiments  ======================")
 
 # Dependency - GTSAM
-find_package(GTSAM REQUIRED)
+find_package(GTSAM 4.2.0 REQUIRED)
 include_directories(${GTSAM_INCLUDE_DIR})
 
 # Dependency - The actual iMESA implementation and the IncrementalSAMAgent interface

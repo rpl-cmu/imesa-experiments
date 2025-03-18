@@ -2,8 +2,8 @@ message(STATUS "================  Experiment Runner  ======================")
 
 # Prereqs
 find_package(Boost COMPONENTS program_options REQUIRED)
-find_package(jrl REQUIRED)
-find_package(nlohmann_json REQUIRED)
+find_package(jrl 1.1.1 REQUIRED)
+find_package(nlohmann_json 3.7.3 REQUIRED)
 
 # Build the experiments module
 file(GLOB_RECURSE experiments_srcs "*.cpp" "*.h")

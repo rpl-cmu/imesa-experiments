@@ -34,9 +34,9 @@ This repository currently provides implementations of a Centralized baseline, an
 A keen reader will notice that Distributed Loopy Belief Propagation (DLGBP) (an important comparison in the paper above) is missing from this list. The original authors of DLGBP were kind enough to provide us with their internal implementation of the algorithm to use in our experiments (Shoutout to Riku Murai for all their help!). However, as it was their internal implementation, it is not our place to release it. Therefore we have not included DLGBP in the public release of this repository.
 
 ## Dependencies
-  * GTSAM - [Github](https://github.com/borglab/gtsam) - Factor-graph library for SLAM.
-  * nlohmann-json - [Github](https://github.com/nlohmann/json) - JSON library provides parsing/serializing of JSON.
-  * JRL - [Github](https://github.com/DanMcGann/jrl) - SLAM dataset library for IO of datasets and results.
+  * GTSAM - [Github](https://github.com/borglab/gtsam) - Factor-graph library for SLAM (v4.2.0)
+  * nlohmann-json - [Github](https://github.com/nlohmann/json) - JSON library provides parsing/serializing of JSON. (v3.7.3+)
+  * JRL - [Github](https://github.com/DanMcGann/jrl) - SLAM dataset library for IO of datasets and results.(v1.1.1+)
   * iMESA - [Github](https://github.com/rpl-cmu/imesa) - Implementation of the iMESA algorithm.
 
 ## Setup Instructions
@@ -60,7 +60,7 @@ The following instructions are designed to construct a local build of iMESA expe
   * `make`
 3. Build JRL
   * `cd WORKSPACE`
-  * `git clone -b v1.0.0 https://github.com/DanMcGann/jrl.git`
+  * `git clone -b v1.1.1 https://github.com/DanMcGann/jrl.git`
   * `cd jrl && mkdir build && cd build`
   * `cmake .. -DGTSAM_DIR=WORKSPACE/gtsam/build -DGTSAM_INCLUDE_DIR=WORKSPACE/gtsam/gtsam`
   * `make`

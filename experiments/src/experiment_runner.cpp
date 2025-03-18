@@ -208,13 +208,13 @@ void ExperimentRunner::computeAndSaveMetrics(const std::optional<std::map<RobotI
                                              const jrl::Dataset& dataset, const jrl::Results& results) const {
   jrl::MetricSummary metrics;
   if (pose_type_ == "POSE3") {
-    metrics = jrl::metrics::computeMetricSummary<gtsam::Pose3>(dataset, results, align_, false, step_idxes);
+    metrics = jrl::metrics::computeMetricSummary<gtsam::Pose3>(dataset, results, align_, false, true, step_idxes);
   } else if (pose_type_ == "POSE2") {
-    metrics = jrl::metrics::computeMetricSummary<gtsam::Pose2>(dataset, results, align_, false, step_idxes);
+    metrics = jrl::metrics::computeMetricSummary<gtsam::Pose2>(dataset, results, align_, false, true, step_idxes);
   } else if (pose_type_ == "VEC2") {
-    metrics = jrl::metrics::computeMetricSummary<gtsam::Point2>(dataset, results, align_, false, step_idxes);
+    metrics = jrl::metrics::computeMetricSummary<gtsam::Point2>(dataset, results, align_, false, true, step_idxes);
   } else if (pose_type_ == "VEC3") {
-    metrics = jrl::metrics::computeMetricSummary<gtsam::Point3>(dataset, results, align_, false, step_idxes);
+    metrics = jrl::metrics::computeMetricSummary<gtsam::Point3>(dataset, results, align_, false, true, step_idxes);
   } else {
     throw std::runtime_error("ExperimentRunner: invalid pose_type when computing metrics");
   }
