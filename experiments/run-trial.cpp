@@ -93,8 +93,10 @@ int main(int argc, const char *argv[]) {
   }
 
   // Build the Communication Model
-  experiments::CommunicationModelParams params =
-      experiments::parseCommunicationModelParams(args["comm_params"].as<std::string>());
+  experiments::CommunicationModelParams params;
+  if (args["comm_params"].as<std::string>() != "") {
+    params = experiments::parseCommunicationModelParams(args["comm_params"].as<std::string>());
+  }
   CommunicationModel comm_model(params, dataset, args["random_seed"].as<size_t>());
 
   // Setup the save out locations
