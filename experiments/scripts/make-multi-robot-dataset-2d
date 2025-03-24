@@ -271,7 +271,6 @@ def add_priors(
             stamp,
             fg,
             [jrl.PriorFactorPose2Tag],
-            {},
             jrl.TypedValues(vals, {key: jrl.Pose2Tag}),
             jrl.TypedValues(vals, {key: jrl.Pose2Tag}),
         )
@@ -637,7 +636,6 @@ def make_dataset(args, dataset_count):
                 stamp,
                 graphs[rid],
                 factor_types[rid],
-                {},
                 jrl.TypedValues(new_est_vals[rid], new_est_types[rid]),
                 jrl.TypedValues(new_gt_vals[rid], new_gt_types[rid]),
             )
